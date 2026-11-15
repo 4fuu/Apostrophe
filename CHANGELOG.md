@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Build-time framework version and compile-time compatibility checks** (`apostrophe.h`, `examples/demo/main.c`, `docs/API.md`, `docs/GETTING_STARTED.md`, `tests/version.c`, `Makefile`): added `AP_VERSION_MAJOR`, `AP_VERSION_MINOR`, `AP_VERSION_PATCH`, `AP_VERSION_STRING`, `AP_VERSION_NUMBER`, `AP_VERSION_AT_LEAST()`, and `AP_VERSION_REQUIRE()`. The demo's About screens now read `AP_VERSION_STRING` instead of hardcoded values, and `make test-version` covers the new macros on the host. `AP_VERSION_*` identifies the Apostrophe headers used at build time and is unrelated to the NextUI system version or `pak.json` `min_system`.
+- **Optional host integration seam** (`apostrophe_host.h`, `apostrophe.h`, `examples/host/main.c`, `tests/host_adapter.c`, `Makefile`): apps can attach a host backend that owns a system overlay, poll it once per frame, skip app input while it owns the frame, draw it last, and receive one-shot normal-exit requests. `ap_host_overlay_changed()` is transition-only and feeds opened/closed plus input yielded/returned events. The new `ap_reset_input()` drops queued SDL/device input and held/repeat latches so overlay presses do not leak back into the app. Detached behavior is unchanged; the example uses a fake backend and links no desktop overlay code. `make test-host` covers detach, transitions, input isolation, and one-shot quit; `make test` runs it with the version checks.
 
 ## [v1.2.0] - 2026-09-11
 

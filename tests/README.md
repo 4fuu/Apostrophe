@@ -14,6 +14,21 @@ encoding, and that `AP_VERSION_STRING` matches the numeric components. This is
 the host check for Apostrophe's build-time version; it does not test NextUI
 system compatibility or `pak.json` `min_system`.
 
+## Host adapter (host)
+
+`tests/host_adapter.c` checks the optional `ap_host_*` seam with a fake backend
+and a headless SDL instance:
+
+```sh
+make test-host
+```
+
+It covers detached no-ops, attach/detach idempotence, transition-only overlay
+events, input yield/return ordering, queued SDL input isolation across an
+overlay open/close, one-shot quit delivery, and `ap_host_present()` calling the
+backend draw before presenting. The fake backend is test logic, not NextUI or a
+system overlay. `make test` runs this check after `test-version`.
+
 ## Input regression checks (device toolchain)
 
 Build both checks with the same universal toolchain used by the examples:

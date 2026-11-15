@@ -53,14 +53,21 @@ NEXTUI_PREVIEW_REPO_DIR := $(NEXTUI_PREVIEW_CACHE)/repo
 NEXTUI_PREVIEW_ASSETS_DIR := $(NEXTUI_PREVIEW_CACHE)/assets
 NEXTUI_PREVIEW_READY := $(NEXTUI_PREVIEW_CACHE)/.ready
 
-# Example names
+# Example names. HOST_EXAMPLES build only for the native preview; they use a
+# fake host backend and are not packaged for devices.
 EXAMPLES := hello demo download combo perf
+HOST_EXAMPLES := host
 WARN_CFLAGS := -Wall -Wextra -Wno-unused-parameter
+HOST_PLATFORM_DEFINE := $(shell printf '%s' '$(NATIVE_PLATFORM)' | tr '[:lower:]' '[:upper:]')
+HOST_LDLIBS := -lm
+ifneq ($(NATIVE_PLATFORM),windows)
+HOST_LDLIBS += -lpthread
+endif
 
 # ─── Phony targets ───────────────────────────────────────────────────────
 
 .PHONY: all native mac linux windows universal tg5040 tg5050 my355 package deploy clean help \
-	test-version run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
+	test test-version test-host run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
 
 # ─── Native (auto-detect host OS) ─────────────────────────────────────
 
@@ -90,6 +97,20 @@ test-version:
 		echo "PASS: AP_VERSION_REQUIRE rejects a version newer than the headers"; \
 	fi
 
+# Host-only contract checks for the optional ap_host_* seam. The fake backend
+# is test logic, not a system overlay.
+test-host:
+	@mkdir -p $(BUILD_DIR)/tests
+	cc -std=gnu11 -O0 -g $(WARN_CFLAGS) -DPLATFORM_$(HOST_PLATFORM_DEFINE) \
+		-I$(INCLUDE_DIR) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(BUILD_DIR)/tests/host_adapter tests/host_adapter.c \
+		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
+		$(HOST_LDLIBS)
+	@SDL_VIDEODRIVER=dummy $(BUILD_DIR)/tests/host_adapter
+
+test: test-version test-host
+
 all: tg5040 tg5050 my355
 
 # One ARMv8-A/glibc-baseline binary; PLATFORM and DEVICE are selected at runtime.
@@ -109,7 +130,7 @@ universal-%:
 
 # ─── macOS (native) ─────────────────────────────────────────────────────
 
-mac: $(EXAMPLES:%=mac-%)
+mac: $(EXAMPLES:%=mac-%) $(HOST_EXAMPLES:%=mac-%)
 
 # libcurl support (optional — enable with CURL=1 or auto-detect)
 CURL ?= $(shell pkg-config --exists libcurl 2>/dev/null && echo 1 || echo 0)
@@ -244,7 +265,7 @@ FORCE:
 
 # ─── Linux (native) ───────────────────────────────────────────────────
 
-linux: $(EXAMPLES:%=linux-%)
+linux: $(EXAMPLES:%=linux-%) $(HOST_EXAMPLES:%=linux-%)
 
 linux-%:
 	@echo "════════ Building $* for Linux ════════"
@@ -271,7 +292,7 @@ run-linux: run-linux-hello
 
 # ─── Windows (MSYS2/MinGW) ────────────────────────────────────────────
 
-windows: $(EXAMPLES:%=windows-%)
+windows: $(EXAMPLES:%=windows-%) $(HOST_EXAMPLES:%=windows-%)
 
 windows-%:
 	@echo "════════ Building $* for Windows ════════"
@@ -447,7 +468,8 @@ help:
 	@echo "  Development (native):"
 	@echo "  make native         Build for current host OS (detected: $(NATIVE_PLATFORM))"
 	@echo "  make run-native     Build + run hello on current host OS"
-	@echo "  make run-native-<x> Build + run example <x> on current host OS"
+	@echo "  make run-native-<x> Build + run example <x> on current host OS (includes host)"
+	@echo "  make test           Run version and host-adapter contract checks"
 	@echo "  make mac            Build examples for macOS"
 	@echo "  make linux          Build examples for Linux"
 	@echo "  make windows        Build examples for Windows (MSYS2/MinGW)"

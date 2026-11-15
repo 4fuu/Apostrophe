@@ -116,7 +116,8 @@ MyProject/
     └── apostrophe/
         ├── include/
         │   ├── apostrophe.h
-        │   └── apostrophe_widgets.h
+        │   ├── apostrophe_widgets.h
+        │   └── apostrophe_host.h
         └── res/
             └── font.ttf
 ```
@@ -155,6 +156,23 @@ AP_VERSION_REQUIRE(1, 2, 0);  /* compile error if the headers are older */
 the **Apostrophe headers compiled into the app**, not the NextUI system version.
 The `min_system` field in `pak.json` is a separate system requirement checked by
 the desktop launcher/installer, not by Apostrophe.
+
+### Optional Host Integration
+
+Apps that a desktop launches with a system overlay can opt into the host seam.
+It is a separate header and adds no link-time dependency:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_HOST_IMPLEMENTATION
+#include "apostrophe_host.h"
+```
+
+Attach the host's backend after `ap_init()`, call `ap_host_poll()` before app
+input, and use `ap_host_present()` after drawing. A detached app keeps the
+normal Apostrophe lifecycle. See the API reference's Host Integration section
+and `examples/host/main.c`; that example uses a deliberately fake backend.
 
 ## Step 2: Initialise
 

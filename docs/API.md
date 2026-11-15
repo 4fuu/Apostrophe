@@ -17,6 +17,7 @@ This reference documents Apostrophe **v1.2.0** (2026-09-11).
   - [Theming](#theming)
   - [Fonts](#fonts)
   - [Input](#input)
+  - [Host Integration (optional)](#host-integration-optional)
   - [Drawing Primitives](#drawing-primitives)
   - [Screen Fade](#screen-fade)
   - [Footer & Status Bar](#footer--status-bar)
@@ -367,6 +368,12 @@ Poll for the next input event. Returns `true` if an event was available.
 
 Handles SDL event processing internally: keyboard events, raw joystick buttons/axes/hats (TrimUI), SDL GameController buttons/axes (macOS + recognised gamepads), platform-specific scancodes (my355), and quit events.
 
+#### `void ap_reset_input(void)`
+
+Drop queued input and all held/repeat state. Pending SDL keyboard, joystick, and controller events are flushed, and device raw-input queues are drained. Combo registrations are kept; transient combo state, directional repeat deadlines, footer-overflow latches, and stored input wake events are cleared.
+
+Call this when another focus owner takes or returns input, so a press or release made against that owner cannot leak into the app. `make test-host` covers this with a fake host. The function is safe with no host adapter attached and does nothing before `ap_init()` completes.
+
 #### `void ap_flip_face_buttons(bool flip)`
 
 Swap A/B and X/Y button mappings. When `flip` is true, hardware A reports as `AP_BTN_B` and vice versa (likewise X/Y). Useful for platforms where the firmware already swaps face buttons.
@@ -382,6 +389,92 @@ Set input debounce delay in milliseconds.
 #### `void ap_set_input_repeat(uint32_t delay_ms, uint32_t rate_ms)`
 
 Configure directional hold repeat timing for D-pad/arrow/button-mapped directions.
+
+### Host Integration (optional)
+
+`include/apostrophe_host.h` is an optional, header-only seam for a desktop that provides a system overlay. Apostrophe does not implement that overlay; the host backend owns its rendering, its inputs, and its overlay lifetime.
+
+Define `AP_HOST_IMPLEMENTATION` in exactly one source file, after `AP_IMPLEMENTATION` for `apostrophe.h`:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_HOST_IMPLEMENTATION
+#include "apostrophe_host.h"
+```
+
+The app main loop becomes:
+
+```c
+ap_host_backend backend = {
+    .user = host_state,
+    .poll = host_poll,       /* 1 = host consumed this frame */
+    .draw = host_draw,       /* called after the app frame, before present */
+};
+ap_host_attach(&backend, on_host_event, app_state);
+
+while (!quit) {
+    if (!ap_host_poll()) {
+        while (ap_poll_input(&ev)) {
+            /* app input */
+        }
+    }
+    draw_app();
+    ap_host_present();       /* host draw, then ap_present() */
+}
+ap_host_detach();
+```
+
+#### Backend callbacks
+
+| Field | Contract |
+|-------|----------|
+| `int (*poll)(void *user)` | Called once per frame. Return 1 when the host or its overlay owns this frame, so the app skips its own input. |
+| `void (*draw)(void *user, SDL_Renderer *renderer)` | Optional. Called by `ap_host_present()` after the app frame and before present. Draw the host overlay into the supplied renderer; do not call `ap_present()`. |
+
+#### `int ap_host_attach(const ap_host_backend *backend, ap_host_event_cb on_event, void *user)`
+
+Attach a backend after `ap_init()`. Returns `AP_OK`, or `AP_ERROR` for a NULL backend, a backend without `poll`, or a different backend while one is already attached. Re-attaching the same backend and callback is idempotent. The struct is copied; the host owns its `user` data and any overlay objects.
+
+#### `void ap_host_detach(void)`
+
+Clear all adapter state. Idempotent. Does not call the backend or change the host overlay; detach before destroying the host object.
+
+#### `bool ap_host_attached(void)`
+
+Whether a backend is attached.
+
+#### `bool ap_host_poll(void)`
+
+Pump the host once. Returns true when the app must skip its own input this frame. Always false while detached. A latched quit request also returns true.
+
+#### `void ap_host_present(void)`
+
+Call after the app has finished drawing, instead of `ap_present()`. Invokes the backend's `draw` (if any) and then presents the frame. While detached it is exactly `ap_present()`.
+
+#### `void ap_host_overlay_changed(bool open)`
+
+Host-to-adapter transition notification. Call only when the overlay actually opens or closes, normally from the host overlay's focus callback. Repeating the current state is a no-op. On a transition the adapter calls `ap_reset_input()`, updates `ap_host_overlay_open()`, and emits `AP_HOST_EVENT_OVERLAY_OPENED` then `AP_HOST_EVENT_INPUT_YIELDED` on open, or `AP_HOST_EVENT_OVERLAY_CLOSED` then `AP_HOST_EVENT_INPUT_RETURNED` on close.
+
+#### `int ap_host_request_quit(void)`
+
+Host's normal application-exit request. Returns 1 when accepted, latches, and emits `AP_HOST_EVENT_QUIT_REQUESTED` once. It never calls `exit()`, raises a signal, kills a process, or touches launcher files. The app must set its own quit flag and leave its main loop. Repeated calls return 1 without a second event.
+
+#### `bool ap_host_overlay_open(void)` / `bool ap_host_quit_requested(void)`
+
+Current adapter state. Both are false while detached.
+
+#### Events
+
+| Event | Meaning |
+|-------|---------|
+| `AP_HOST_EVENT_OVERLAY_OPENED` | Overlay took focus. |
+| `AP_HOST_EVENT_INPUT_YIELDED` | Input was reset and now belongs to the host. |
+| `AP_HOST_EVENT_OVERLAY_CLOSED` | Overlay released focus. |
+| `AP_HOST_EVENT_INPUT_RETURNED` | Input was reset again and the app may poll. |
+| `AP_HOST_EVENT_QUIT_REQUESTED` | One-shot normal exit request. |
+
+Detached behavior is unchanged: no host, no overlay, and no added exit path. A host that implements the overlay with its own module must not copy that renderer into Apostrophe; it only supplies these callbacks.
 
 ### Drawing Primitives
 
