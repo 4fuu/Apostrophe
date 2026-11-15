@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Amp orb setup for Apostrophe (https://github.com/4fuu/Apostrophe, a copy of
+# Helaas/Apostrophe).
+#
+# Apostrophe is a header-only C toolkit, so the host build needs only a C
+# compiler and SDL2: `make native` builds every example under examples/ into
+# build/<os>/<example>/<example>. Device cross-compilation (make tg5040/tg5050/
+# my355/universal) runs inside ghcr.io/loveretro/*-toolchain Docker images,
+# which orbs cannot run.
+set -euo pipefail
+
+cd "$(dirname "$BASH_SOURCE")/.."
+
+step() { printf '\n[setup %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+
+# See docs/GETTING_STARTED.md. libcurl is optional: the Makefile enables the
+# Download Manager widget when pkg-config finds it.
+PACKAGES=(
+  build-essential pkg-config git
+  libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
+  libcurl4-openssl-dev
+)
+
+step "checking system packages"
+missing=()
+for pkg in "${PACKAGES[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+    missing+=("$pkg")
+  fi
+done
+
+if ((${#missing[@]})); then
+  step "installing ${#missing[@]} missing packages: ${missing[*]}"
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+else
+  step "all system packages already installed"
+fi
+
+step "verifying SDL2 toolchain"
+for lib in sdl2 SDL2_ttf SDL2_image libcurl; do
+  pkg-config --exists "$lib" || { echo "missing pkg-config entry: $lib" >&2; exit 1; }
+done
+for bin in gcc make pkg-config; do
+  command -v "$bin" >/dev/null || { echo "missing tool: $bin" >&2; exit 1; }
+done
+
+# Leave the build knowledge where a thread in a fresh orb will read it.
+guidance="$HOME/.config/amp/AGENTS.md"
+marker="# Apostrophe orb build notes"
+if ! grep -Fqx "$marker" "$guidance" 2>/dev/null; then
+  mkdir -p "$(dirname "$guidance")"
+  cat >> "$guidance" <<'EOF'
+
+# Apostrophe orb build notes
+- Build every example for the host: `make native` (output: build/linux/<example>/<example>). `make run-native` runs one, but needs a display.
+- Headless smoke test: run an example with `SDL_VIDEODRIVER=dummy`; it initializes and runs the event loop without a window.
+- Device targets (tg5040, tg5050, my355, universal) cross-compile inside Docker images from ghcr.io/loveretro/*-toolchain, and Docker is unavailable in orbs.
+EOF
+fi
+
+step "done"
