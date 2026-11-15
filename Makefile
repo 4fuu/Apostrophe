@@ -60,7 +60,7 @@ WARN_CFLAGS := -Wall -Wextra -Wno-unused-parameter
 # ─── Phony targets ───────────────────────────────────────────────────────
 
 .PHONY: all native mac linux windows universal tg5040 tg5050 my355 package deploy clean help \
-	run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
+	test-version run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
 
 # ─── Native (auto-detect host OS) ─────────────────────────────────────
 
@@ -68,6 +68,27 @@ native: $(NATIVE_PLATFORM)
 run-native: run-$(NATIVE_PLATFORM)
 run-native-%:
 	$(MAKE) run-$(NATIVE_PLATFORM)-$*
+
+# Host-only compile and runtime check for the framework version macros.
+test-version:
+	@mkdir -p $(BUILD_DIR)/tests
+	cc -std=gnu11 -O0 -g $(WARN_CFLAGS) -I$(INCLUDE_DIR) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(BUILD_DIR)/tests/version tests/version.c \
+		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image)
+	@$(BUILD_DIR)/tests/version
+	@printf '%s\n' '#include "apostrophe.h"' \
+		'AP_VERSION_REQUIRE(999, 0, 0);' \
+		> $(BUILD_DIR)/tests/version_require_fail.c
+	@if cc -std=gnu11 -I$(INCLUDE_DIR) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-fsyntax-only $(BUILD_DIR)/tests/version_require_fail.c \
+		>/dev/null 2>&1; then \
+		echo "FAIL: AP_VERSION_REQUIRE accepted a version newer than the headers"; \
+		exit 1; \
+	else \
+		echo "PASS: AP_VERSION_REQUIRE rejects a version newer than the headers"; \
+	fi
 
 all: tg5040 tg5050 my355
 

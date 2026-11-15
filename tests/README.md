@@ -1,4 +1,20 @@
-# Input regression checks
+# Apostrophe regression checks
+
+## Version macros (host)
+
+`tests/version.c` checks the framework version macros and compile-time
+compatibility assertions without opening a display:
+
+```sh
+make test-version
+```
+
+It verifies `AP_VERSION_REQUIRE()`, `AP_VERSION_AT_LEAST()`, the decimal
+encoding, and that `AP_VERSION_STRING` matches the numeric components. This is
+the host check for Apostrophe's build-time version; it does not test NextUI
+system compatibility or `pak.json` `min_system`.
+
+## Input regression checks (device toolchain)
 
 Build both checks with the same universal toolchain used by the examples:
 

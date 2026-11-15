@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Build-time framework version and compile-time compatibility checks** (`apostrophe.h`, `examples/demo/main.c`, `docs/API.md`, `docs/GETTING_STARTED.md`, `tests/version.c`, `Makefile`): added `AP_VERSION_MAJOR`, `AP_VERSION_MINOR`, `AP_VERSION_PATCH`, `AP_VERSION_STRING`, `AP_VERSION_NUMBER`, `AP_VERSION_AT_LEAST()`, and `AP_VERSION_REQUIRE()`. The demo's About screens now read `AP_VERSION_STRING` instead of hardcoded values, and `make test-version` covers the new macros on the host. `AP_VERSION_*` identifies the Apostrophe headers used at build time and is unrelated to the NextUI system version or `pak.json` `min_system`.
+
 ## [v1.2.0] - 2026-09-11
 
 ### Added

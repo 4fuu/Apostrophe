@@ -991,7 +991,7 @@ static void demo_process(void) {
 static void demo_detail(void) {
     ap_detail_info_pair info[] = {
         { .key = "Name",             .value = "Apostrophe" },
-        { .key = "Version",          .value = "1.2.0" },
+        { .key = "Version",          .value = AP_VERSION_STRING },
         { .key = "Author",           .value = "Helaas" },
         { .key = "License",          .value = "MIT" },
         { .key = "Language",         .value = "C (header-only)" },
@@ -1163,7 +1163,7 @@ static void demo_detail_styled(void) {
 static void demo_detail_custom_fonts(void) {
     ap_detail_info_pair info[] = {
         { .key = "Name",      .value = "Apostrophe" },
-        { .key = "Version",   .value = "1.2.0" },
+        { .key = "Version",   .value = AP_VERSION_STRING },
         { .key = "Platform",  .value = "All supported devices" },
         { .key = "License",   .value = "MIT" },
     };

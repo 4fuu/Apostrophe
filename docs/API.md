@@ -10,6 +10,7 @@ This reference documents Apostrophe **v1.2.0** (2026-09-11).
 
 - [Core (apostrophe.h)](#core)
   - [Macros & Constants](#macros--constants)
+  - [Version & Compatibility](#version--compatibility)
   - [Types & Enums](#types--enums)
   - [Lifecycle](#lifecycle)
   - [Screen & Scaling](#screen--scaling)
@@ -72,6 +73,54 @@ Apostrophe reads `PLATFORM` (falling back to the basename of `SYSTEM_PATH`) and
 supports `tg5040`, `tg5050`, `my355`, and `h700`. The same identity is available
 through `ap_get_platform()`, `ap_get_platform_name()`, `ap_get_device_name()`,
 and `ap_is_device()`.
+
+### Version & Compatibility
+
+| Macro | Value | Description |
+|-------|-------|-------------|
+| `AP_VERSION_MAJOR` | `1` | Apostrophe framework major version |
+| `AP_VERSION_MINOR` | `2` | Apostrophe framework minor version |
+| `AP_VERSION_PATCH` | `0` | Apostrophe framework patch version |
+| `AP_VERSION_STRING` | `"1.2.0"` | Version string derived from the three components |
+| `AP_VERSION_NUMBER` | `1002000` | Decimal encoding for comparisons and logging |
+| `AP_VERSION_ENCODE(major, minor, patch)` | — | Encode a version as `major * 1000000 + minor * 1000 + patch` |
+| `AP_VERSION_AT_LEAST(major, minor, patch)` | — | True when the headers are at least that version |
+| `AP_VERSION_REQUIRE(major, minor, patch)` | — | Fail compilation when the headers are older |
+
+`AP_VERSION_*` identifies the Apostrophe headers used to build the binary. It is
+build-time framework metadata: Apostrophe is header-only, nothing is installed
+on the device, and this value does not describe the running NextUI system.
+
+`AP_VERSION_ENCODE()` reserves three decimal digits per component, so keep each
+version component below 1000. `AP_VERSION_REQUIRE()` uses C11
+`_Static_assert`, matching the project's C11 baseline.
+
+The `pak.json` `min_system` field is separate. It is a system-level requirement
+owned by the desktop launcher/installer and compared against the desktop's
+semantic release tag. Apostrophe does not read `min_system` and cannot check it
+at compile time.
+
+Require a minimum framework version at compile time:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+
+AP_VERSION_REQUIRE(1, 2, 0);
+```
+
+Use `AP_VERSION_AT_LEAST()` for optional feature branches:
+
+```c
+#if AP_VERSION_AT_LEAST(1, 2, 0)
+    /* Code that needs the 1.2.0 headers. */
+#endif
+```
+
+Use `AP_VERSION_STRING` wherever the framework version should be visible, such
+as an About screen. When packaging, the same value can be recorded in the
+optional `pak.json` `apostrophe` field; that field is framework build metadata
+and does not replace `min_system`.
 
 ### Types & Enums
 

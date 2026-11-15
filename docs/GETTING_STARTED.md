@@ -138,6 +138,24 @@ If your project has multiple `.c` files, only one should have the `#define` line
 
 If you vendor Apostrophe under `third_party/apostrophe`, add `-Ithird_party/apostrophe/include` to your compiler flags and keep the `#include "apostrophe.h"` form shown above.
 
+### Requiring a Minimum Apostrophe Version
+
+The header exposes its own build-time version, so an application can fail early
+when it is compiled against an older copy:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+
+AP_VERSION_REQUIRE(1, 2, 0);  /* compile error if the headers are older */
+```
+
+`AP_VERSION_STRING` (for example, in an About screen) and
+`AP_VERSION_AT_LEAST(major, minor, patch)` are also available. These describe
+the **Apostrophe headers compiled into the app**, not the NextUI system version.
+The `min_system` field in `pak.json` is a separate system requirement checked by
+the desktop launcher/installer, not by Apostrophe.
+
 ## Step 2: Initialise
 
 ```c

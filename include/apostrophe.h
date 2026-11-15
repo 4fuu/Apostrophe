@@ -110,6 +110,50 @@
 #endif
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Framework Version
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Version of the Apostrophe headers compiled into this binary.
+ *
+ * This is build-time framework metadata, not the NextUI system version.
+ * Apostrophe is header-only and is not installed on the device, so this value
+ * never describes the running desktop. The optional pak.json "min_system"
+ * field is a separate system-level requirement checked by the launcher or
+ * installer; Apostrophe does not read or validate it.
+ *
+ * Bump these values when preparing an Apostrophe release. Applications can
+ * enforce a minimum header version with AP_VERSION_REQUIRE() or branch on
+ * AP_VERSION_AT_LEAST(). */
+#define AP_VERSION_MAJOR 1
+#define AP_VERSION_MINOR 2
+#define AP_VERSION_PATCH 0
+
+#define AP__STRINGIFY_IMPL(x) #x
+#define AP__STRINGIFY(x) AP__STRINGIFY_IMPL(x)
+
+#define AP_VERSION_STRING \
+    AP__STRINGIFY(AP_VERSION_MAJOR) "." \
+    AP__STRINGIFY(AP_VERSION_MINOR) "." \
+    AP__STRINGIFY(AP_VERSION_PATCH)
+
+/* Decimal encoding keeps versions readable in logs: 1.2.0 -> 1002000.
+   Components must stay below 1000 so encoded order matches semantic order. */
+#define AP_VERSION_ENCODE(major, minor, patch) \
+    ((major) * 1000000 + (minor) * 1000 + (patch))
+
+#define AP_VERSION_NUMBER \
+    AP_VERSION_ENCODE(AP_VERSION_MAJOR, AP_VERSION_MINOR, AP_VERSION_PATCH)
+
+#define AP_VERSION_AT_LEAST(major, minor, patch) \
+    (AP_VERSION_NUMBER >= AP_VERSION_ENCODE((major), (minor), (patch)))
+
+/* Compile-time requirement; expands to a declaration, so add a semicolon. */
+#define AP_VERSION_REQUIRE(major, minor, patch) \
+    _Static_assert(AP_VERSION_AT_LEAST((major), (minor), (patch)), \
+        "Apostrophe " AP__STRINGIFY(major) "." AP__STRINGIFY(minor) "." \
+        AP__STRINGIFY(patch) " or newer is required")
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Constants & Return Codes
  * ═══════════════════════════════════════════════════════════════════════════ */
 
