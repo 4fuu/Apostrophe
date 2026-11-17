@@ -1,0 +1,15 @@
+{
+  "name": "Fixture App",
+  "version": "v1.4.2",
+  "type": "TOOL",
+  "id": "fixture.app",
+  "description": "Host-only pak.json fixture for Apostrophe tests",
+  "min_system": "v6.15.0",
+  "capabilities": ["saves", "overlay"],
+  "device": {
+    "name": "nested-name",
+    "capabilities": ["led.control"]
+  },
+  "author": "Apostrophe tests",
+  "platforms": ["desktop"]
+}

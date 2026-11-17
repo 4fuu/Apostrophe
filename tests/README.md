@@ -29,6 +29,21 @@ overlay open/close, one-shot quit delivery, and `ap_host_present()` calling the
 backend draw before presenting. The fake backend is test logic, not NextUI or a
 system overlay. `make test` runs this check after `test-version`.
 
+## pak.json reader (host)
+
+`tests/pak_json.c` checks the optional `apostrophe_pak.h` reader against fixture
+files under `tests/fixtures/pak_json/`:
+
+```sh
+make test-pak
+```
+
+It covers a full manifest, missing file/fields and wrong types, directory-name
+fallback, escaped/Unicode strings, ignored nested values, capability limits,
+duplicate keys, malformed JSON, minimum-system comparisons, and capability
+self-checks. The helper is read-only and does not link NextUI. `make test` runs
+this check with the version and host-adapter checks.
+
 ## Input regression checks (device toolchain)
 
 Build both checks with the same universal toolchain used by the examples:

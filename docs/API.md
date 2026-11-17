@@ -18,6 +18,7 @@ This reference documents Apostrophe **v1.2.0** (2026-09-11).
   - [Fonts](#fonts)
   - [Input](#input)
   - [Host Integration (optional)](#host-integration-optional)
+  - [Pak Manifest (optional)](#pak-manifest-optional)
   - [Drawing Primitives](#drawing-primitives)
   - [Screen Fade](#screen-fade)
   - [Footer & Status Bar](#footer--status-bar)
@@ -475,6 +476,107 @@ Current adapter state. Both are false while detached.
 | `AP_HOST_EVENT_QUIT_REQUESTED` | One-shot normal exit request. |
 
 Detached behavior is unchanged: no host, no overlay, and no added exit path. A host that implements the overlay with its own module must not copy that renderer into Apostrophe; it only supplies these callbacks.
+
+### Pak Manifest (optional)
+
+`include/apostrophe_pak.h` is an optional, header-only reader for the small
+pak.json fields an app needs at startup. It does not install, update, validate a
+package, or read desktop system files. Define `AP_PAK_IMPLEMENTATION` in exactly
+one source file:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_PAK_IMPLEMENTATION
+#include "apostrophe_pak.h"
+```
+
+The four string fields use fixed buffers: `AP_PAK_ID_MAX` 64, `AP_PAK_NAME_MAX`
+128, `AP_PAK_VERSION_MAX` 32, and `AP_PAK_MIN_SYSTEM_MAX` 32. Up to
+`AP_PAK_MAX_CAPABILITIES` (8) capability names are kept, each up to
+`AP_PAK_CAPABILITY_MAX` (32) bytes. A file larger than `AP_PAK_JSON_MAX` (64 KiB)
+is rejected.
+
+```c
+typedef struct {
+    char id[AP_PAK_ID_MAX];
+    char name[AP_PAK_NAME_MAX];
+    char version[AP_PAK_VERSION_MAX];
+    char min_system[AP_PAK_MIN_SYSTEM_MAX];
+    char capabilities[AP_PAK_MAX_CAPABILITIES][AP_PAK_CAPABILITY_MAX];
+    int  capability_count;
+    bool has_id, has_name, has_version, has_min_system;
+    bool capabilities_truncated;
+} ap_pak_info;
+```
+
+#### `void ap_pak_info_init(ap_pak_info *info, const char *fallback_id)`
+
+Fill safe defaults. `id` and `name` use `fallback_id` (or `"unknown"`), version
+and `min_system` are empty, and there are no capabilities.
+
+#### `int ap_pak_load(const char *pak_dir, ap_pak_info *info)`
+
+Read `<pak_dir>/pak.json`. The fallback id/name is the last path component of
+`pak_dir`. A missing/unreadable/oversized file returns `AP_ERROR`, but `info`
+still contains that fallback, so an app can continue with its directory name.
+
+#### `int ap_pak_load_file(const char *path, const char *fallback_id, ap_pak_info *info)` / `int ap_pak_parse(const char *json, const char *fallback_id, ap_pak_info *info)`
+
+Explicit file or in-memory JSON variants. A valid object returns `AP_OK` even
+when fields are absent or the wrong type; malformed JSON returns `AP_ERROR` and
+leaves only the safe defaults. Unknown keys, nested objects/arrays, and
+`device` data are ignored. Duplicate known keys use the last value. JSON escapes,
+UTF-8, and `\u` escapes are accepted.
+
+Missing-field behavior:
+
+| Input | Result |
+|-------|--------|
+| no file / unreadable / oversized / malformed | `AP_ERROR`; directory fallback id/name |
+| no `id` | `id` = fallback, `has_id` = false |
+| no `name` | `name` = `id`, `has_name` = false |
+| no `version` / `min_system` | empty strings, `has_*` = false |
+| wrong field type | field stays at its safe default |
+| no `capabilities` | count 0 |
+| more than 8 capabilities | first 8 kept, `capabilities_truncated` = true |
+
+#### `int ap_pak_min_system_ok(const ap_pak_info *info, const char *system_version)`
+
+Compare `info.min_system` with a caller-supplied desktop version. Returns 1 when
+compatible or when `min_system` is absent, 0 when the system is older, and -1
+when either version is invalid. Versions accept an optional `v`, one to three
+numeric components, and a suffix such as `-rc1`; the suffix is ignored for the
+core comparison. The caller decides where its system version comes from;
+Apostrophe does not read NextUI's `version.txt`.
+
+#### `int ap_pak_has_capability(const ap_pak_info *info, const char *capability)` / `int ap_pak_check_capabilities(...)`
+
+Exact, case-sensitive capability lookup. `ap_pak_check_capabilities(info,
+required, count, &missing)` returns 1 only when all required names are present;
+`missing` receives the first absent name (or NULL). A zero/negative count is
+vacuously satisfied.
+
+Example:
+
+```c
+ap_pak_info pak;
+if (ap_pak_load(".", &pak) != AP_OK) {
+    ap_log("pak.json unavailable; continuing as %s", pak.id);
+}
+
+if (ap_pak_min_system_ok(&pak, system_version) == 0) {
+    /* Show "requires newer system" and leave the normal main loop. */
+}
+
+const char *required[] = { "saves" };
+const char *missing = NULL;
+if (!ap_pak_check_capabilities(&pak, required, 1, &missing))
+    ap_log("capability unavailable: %s", missing);
+```
+
+The helper is read-only and MIT-licensed like the rest of Apostrophe. It does
+not copy NextUI code or assets.
 
 ### Drawing Primitives
 

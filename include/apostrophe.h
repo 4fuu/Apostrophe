@@ -4314,7 +4314,7 @@ static void ap__draw_status_bar_battery_sprite(int x, int y, TTF_Font *font) {
     }
 
     if (show_pct && bat >= 0) {
-        char pct_text[8];
+        char pct_text[16];
         TTF_Font *micro = ap_get_font(AP_FONT_MICRO);
         if (!micro) micro = font;
         snprintf(pct_text, sizeof(pct_text), "%d", bat);

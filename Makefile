@@ -67,7 +67,7 @@ endif
 # ─── Phony targets ───────────────────────────────────────────────────────
 
 .PHONY: all native mac linux windows universal tg5040 tg5050 my355 package deploy clean help \
-	test test-version test-host run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
+	test test-version test-host test-pak run-mac-demo run-mac-download setup-nextui-preview-cache clean-nextui-preview-cache FORCE
 
 # ─── Native (auto-detect host OS) ─────────────────────────────────────
 
@@ -109,7 +109,16 @@ test-host:
 		$(HOST_LDLIBS)
 	@SDL_VIDEODRIVER=dummy $(BUILD_DIR)/tests/host_adapter
 
-test: test-version test-host
+# Host-only pak.json reader/self-check checks. Does not link NextUI.
+test-pak:
+	@mkdir -p $(BUILD_DIR)/tests
+	cc -std=gnu11 -O0 -g $(WARN_CFLAGS) -DPLATFORM_$(HOST_PLATFORM_DEFINE) \
+		-I$(INCLUDE_DIR) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(BUILD_DIR)/tests/pak_json tests/pak_json.c
+	@$(BUILD_DIR)/tests/pak_json
+
+test: test-version test-host test-pak
 
 all: tg5040 tg5050 my355
 
@@ -469,7 +478,7 @@ help:
 	@echo "  make native         Build for current host OS (detected: $(NATIVE_PLATFORM))"
 	@echo "  make run-native     Build + run hello on current host OS"
 	@echo "  make run-native-<x> Build + run example <x> on current host OS (includes host)"
-	@echo "  make test           Run version and host-adapter contract checks"
+	@echo "  make test           Run version, host-adapter, and pak.json checks"
 	@echo "  make mac            Build examples for macOS"
 	@echo "  make linux          Build examples for Linux"
 	@echo "  make windows        Build examples for Windows (MSYS2/MinGW)"

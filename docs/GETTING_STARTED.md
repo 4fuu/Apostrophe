@@ -117,7 +117,8 @@ MyProject/
         ├── include/
         │   ├── apostrophe.h
         │   ├── apostrophe_widgets.h
-        │   └── apostrophe_host.h
+        │   ├── apostrophe_host.h
+        │   └── apostrophe_pak.h
         └── res/
             └── font.ttf
 ```
@@ -173,6 +174,27 @@ Attach the host's backend after `ap_init()`, call `ap_host_poll()` before app
 input, and use `ap_host_present()` after drawing. A detached app keeps the
 normal Apostrophe lifecycle. See the API reference's Host Integration section
 and `examples/host/main.c`; that example uses a deliberately fake backend.
+
+### Optional Pak Manifest Self-Check
+
+`apostrophe_pak.h` reads the app's own pak.json and degrades safely when fields
+are missing:
+
+```c
+#define AP_PAK_IMPLEMENTATION
+#include "apostrophe_pak.h"
+
+ap_pak_info pak;
+if (ap_pak_load(".", &pak) != AP_OK) {
+    ap_log("continuing without pak.json as %s", pak.id);
+}
+if (ap_pak_min_system_ok(&pak, system_version) == 0) {
+    ap_log("this system is older than %s", pak.min_system);
+}
+```
+
+The caller supplies its system version; the helper does not read NextUI files.
+See the API reference's Pak Manifest section.
 
 ## Step 2: Initialise
 
