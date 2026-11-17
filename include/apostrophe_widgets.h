@@ -4095,11 +4095,8 @@ typedef struct {
     char               error[256];
 } ap__dl_snapshot;
 
-/* libcurl progress callback */
-static int ap__dl_progress_cb(void *clientp,
-                               double dltotal, double dlnow,
-                               double ultotal, double ulnow) {
-    (void)ultotal; (void)ulnow;
+/* Shared progress handling for both libcurl callback generations. */
+static int ap__dl_progress_update(void *clientp, double dltotal, double dlnow) {
     ap__dl_thread_data *td = (ap__dl_thread_data *)clientp;
 
     /* Check cancellation */
@@ -4115,6 +4112,22 @@ static int ap__dl_progress_cb(void *clientp,
     if (cancel) return 1; /* Abort transfer */
     return 0;
 }
+
+#if LIBCURL_VERSION_NUM >= 0x072000 /* 7.32.0 */
+static int ap__dl_xferinfo_cb(void *clientp,
+                              curl_off_t dltotal, curl_off_t dlnow,
+                              curl_off_t ultotal, curl_off_t ulnow) {
+    (void)ultotal; (void)ulnow;
+    return ap__dl_progress_update(clientp, (double)dltotal, (double)dlnow);
+}
+#else
+static int ap__dl_progress_cb(void *clientp,
+                               double dltotal, double dlnow,
+                               double ultotal, double ulnow) {
+    (void)ultotal; (void)ulnow;
+    return ap__dl_progress_update(clientp, dltotal, dlnow);
+}
+#endif
 
 /* libcurl write callback — write to file */
 static size_t ap__dl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -4170,7 +4183,11 @@ static void *ap__dl_worker(void *arg) {
     curl_easy_setopt(curl, CURLOPT_URL, dl->url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ap__dl_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+#if LIBCURL_VERSION_NUM >= 0x072000 /* 7.32.0 */
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ap__dl_xferinfo_cb);
+#else
     curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, ap__dl_progress_cb);
+#endif
     curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, td);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -4202,11 +4219,16 @@ static void *ap__dl_worker(void *arg) {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     /* Get final speed */
+#if LIBCURL_VERSION_NUM >= 0x073700 /* 7.55.0 */
+    curl_off_t speed = 0;
+    curl_easy_getinfo(curl, CURLINFO_SPEED_DOWNLOAD_T, &speed);
+#else
     double speed = 0;
     curl_easy_getinfo(curl, CURLINFO_SPEED_DOWNLOAD, &speed);
+#endif
     pthread_mutex_lock(&td->ctx->mutex);
     dl->http_code = (int)http_code;
-    dl->speed_bps = speed;
+    dl->speed_bps = (double)speed;
     pthread_mutex_unlock(&td->ctx->mutex);
 
     if (hdrs) curl_slist_free_all(hdrs);

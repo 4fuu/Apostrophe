@@ -116,7 +116,9 @@ MyProject/
     └── apostrophe/
         ├── include/
         │   ├── apostrophe.h
-        │   └── apostrophe_widgets.h
+        │   ├── apostrophe_widgets.h
+        │   ├── apostrophe_host.h
+        │   └── apostrophe_pak.h
         └── res/
             └── font.ttf
 ```
@@ -137,6 +139,62 @@ Create a `main.c` file. Define the implementation macros in exactly **one** tran
 If your project has multiple `.c` files, only one should have the `#define` lines. All others just `#include` the headers normally.
 
 If you vendor Apostrophe under `third_party/apostrophe`, add `-Ithird_party/apostrophe/include` to your compiler flags and keep the `#include "apostrophe.h"` form shown above.
+
+### Requiring a Minimum Apostrophe Version
+
+The header exposes its own build-time version, so an application can fail early
+when it is compiled against an older copy:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+
+AP_VERSION_REQUIRE(1, 2, 0);  /* compile error if the headers are older */
+```
+
+`AP_VERSION_STRING` (for example, in an About screen) and
+`AP_VERSION_AT_LEAST(major, minor, patch)` are also available. These describe
+the **Apostrophe headers compiled into the app**, not the NextUI system version.
+The `min_system` field in `pak.json` is a separate system requirement checked by
+the desktop launcher/installer, not by Apostrophe.
+
+### Optional Host Integration
+
+Apps that a desktop launches with a system overlay can opt into the host seam.
+It is a separate header and adds no link-time dependency:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_HOST_IMPLEMENTATION
+#include "apostrophe_host.h"
+```
+
+Attach the host's backend after `ap_init()`, call `ap_host_poll()` before app
+input, and use `ap_host_present()` after drawing. A detached app keeps the
+normal Apostrophe lifecycle. See the API reference's Host Integration section
+and `examples/host/main.c`; that example uses a deliberately fake backend.
+
+### Optional Pak Manifest Self-Check
+
+`apostrophe_pak.h` reads the app's own pak.json and degrades safely when fields
+are missing:
+
+```c
+#define AP_PAK_IMPLEMENTATION
+#include "apostrophe_pak.h"
+
+ap_pak_info pak;
+if (ap_pak_load(".", &pak) != AP_OK) {
+    ap_log("continuing without pak.json as %s", pak.id);
+}
+if (ap_pak_min_system_ok(&pak, system_version) == 0) {
+    ap_log("this system is older than %s", pak.min_system);
+}
+```
+
+The caller supplies its system version; the helper does not read NextUI files.
+See the API reference's Pak Manifest section.
 
 ## Step 2: Initialise
 

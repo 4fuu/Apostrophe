@@ -110,6 +110,50 @@
 #endif
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Framework Version
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Version of the Apostrophe headers compiled into this binary.
+ *
+ * This is build-time framework metadata, not the NextUI system version.
+ * Apostrophe is header-only and is not installed on the device, so this value
+ * never describes the running desktop. The optional pak.json "min_system"
+ * field is a separate system-level requirement checked by the launcher or
+ * installer; Apostrophe does not read or validate it.
+ *
+ * Bump these values when preparing an Apostrophe release. Applications can
+ * enforce a minimum header version with AP_VERSION_REQUIRE() or branch on
+ * AP_VERSION_AT_LEAST(). */
+#define AP_VERSION_MAJOR 1
+#define AP_VERSION_MINOR 2
+#define AP_VERSION_PATCH 0
+
+#define AP__STRINGIFY_IMPL(x) #x
+#define AP__STRINGIFY(x) AP__STRINGIFY_IMPL(x)
+
+#define AP_VERSION_STRING \
+    AP__STRINGIFY(AP_VERSION_MAJOR) "." \
+    AP__STRINGIFY(AP_VERSION_MINOR) "." \
+    AP__STRINGIFY(AP_VERSION_PATCH)
+
+/* Decimal encoding keeps versions readable in logs: 1.2.0 -> 1002000.
+   Components must stay below 1000 so encoded order matches semantic order. */
+#define AP_VERSION_ENCODE(major, minor, patch) \
+    ((major) * 1000000 + (minor) * 1000 + (patch))
+
+#define AP_VERSION_NUMBER \
+    AP_VERSION_ENCODE(AP_VERSION_MAJOR, AP_VERSION_MINOR, AP_VERSION_PATCH)
+
+#define AP_VERSION_AT_LEAST(major, minor, patch) \
+    (AP_VERSION_NUMBER >= AP_VERSION_ENCODE((major), (minor), (patch)))
+
+/* Compile-time requirement; expands to a declaration, so add a semicolon. */
+#define AP_VERSION_REQUIRE(major, minor, patch) \
+    _Static_assert(AP_VERSION_AT_LEAST((major), (minor), (patch)), \
+        "Apostrophe " AP__STRINGIFY(major) "." AP__STRINGIFY(minor) "." \
+        AP__STRINGIFY(patch) " or newer is required")
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Constants & Return Codes
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -556,6 +600,16 @@ int            ap_get_font_bump(void);
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 bool           ap_poll_input(ap_input_event *event);
+
+/* Drop queued input and all held/repeat state.
+ *
+ * Use this when another focus owner (for example a system overlay) takes or
+ * returns input, so a press or release made against the other owner cannot
+ * leak into the application. Pending SDL keyboard/joystick/controller events
+ * and device raw-input queues are discarded; combo registrations are kept,
+ * but transient combo state is cleared. Safe to call when no host adapter is
+ * attached. Does nothing before ap_init() has completed. */
+void           ap_reset_input(void);
 void           ap_set_input_delay(uint32_t ms);
 void           ap_set_input_repeat(uint32_t delay_ms, uint32_t rate_ms);
 void           ap_flip_face_buttons(bool flip);
@@ -2052,7 +2106,37 @@ static void ap__h700_poll_inputs(uint32_t now) {
 static void ap__h700_close_inputs(void) {
     for (int i = 0; i < 16; i++) ap__h700_close_input(i);
 }
+
+/* Discard events that arrived while another focus owner had input. */
+static void ap__h700_drain_inputs(void) {
+    for (int i = 0; i < 16; i++) {
+        int fd = ap__g.h700_input_fds[i];
+        if (fd < 0) continue;
+        struct input_event ev;
+        errno = 0;
+        while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) { /* discard */ }
+        if (errno && errno != EAGAIN && errno != EWOULDBLOCK) ap__h700_close_input(i);
+    }
+}
 #endif
+
+static bool ap__is_input_sdl_event(uint32_t type) {
+    switch (type) {
+        case SDL_KEYDOWN:
+        case SDL_KEYUP:
+        case SDL_JOYAXISMOTION:
+        case SDL_JOYBALLMOTION:
+        case SDL_JOYHATMOTION:
+        case SDL_JOYBUTTONDOWN:
+        case SDL_JOYBUTTONUP:
+        case SDL_CONTROLLERAXISMOTION:
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+            return true;
+        default:
+            return false;
+    }
+}
 
 static void ap__handle_sdl_event(SDL_Event *ev, uint32_t now) {
     switch (ev->type) {
@@ -2294,6 +2378,50 @@ bool ap_poll_input(ap_input_event *event) {
 
         return true;
     }
+}
+
+void ap_reset_input(void) {
+    if (!ap__g.initialized) return;
+
+    /* Internal queue and edge/repeat state. */
+    ap__input_head = 0;
+    ap__input_tail = 0;
+    memset(ap__g.buttons_held, 0, sizeof(ap__g.buttons_held));
+    memset(ap__g.button_press_time, 0, sizeof(ap__g.button_press_time));
+    memset(ap__g.button_repeat_time, 0, sizeof(ap__g.button_repeat_time));
+    ap__g.hat_held = 0;
+    ap__g.hat_repeat_time = 0;
+    ap__g.axis_held_dir_y = 0;
+    ap__g.axis_held_dir_x = 0;
+    ap__g.axis_repeat_time_y = 0;
+    ap__g.axis_repeat_time_x = 0;
+    ap__g.last_input_time = 0;
+
+    /* Transient UI/input latches, not registrations. */
+    ap__g.footer_overflow_chord_held = false;
+    ap__g.footer_overflow_open_requested = false;
+    memset(ap__g.footer_overflow_swallow, 0, sizeof(ap__g.footer_overflow_swallow));
+    memset(ap__g.combo_held, 0, sizeof(ap__g.combo_held));
+    ap__g.seq_buffer_count = 0;
+    ap__g.combo_queue_head = 0;
+    ap__g.combo_queue_tail = 0;
+
+    /* A stored wake event may be an input edge; keep non-input events. */
+    if (ap__g.has_wake_event && ap__is_input_sdl_event(ap__g.wake_event.type))
+        ap__g.has_wake_event = false;
+
+    /* Drop events that were queued while the other owner had focus. */
+    if (SDL_WasInit(SDL_INIT_EVENTS)) {
+        SDL_FlushEvents(SDL_KEYDOWN, SDL_KEYUP);
+        SDL_FlushEvents(SDL_JOYAXISMOTION, SDL_JOYBUTTONUP);
+        SDL_FlushEvents(SDL_CONTROLLERAXISMOTION, SDL_CONTROLLERBUTTONUP);
+    }
+
+    #if AP_PLATFORM_IS_DEVICE
+    ap__h700_drain_inputs();
+    #endif
+
+    ap__g.needs_frame = true;
 }
 
 void ap_set_input_delay(uint32_t ms) {
@@ -4186,7 +4314,7 @@ static void ap__draw_status_bar_battery_sprite(int x, int y, TTF_Font *font) {
     }
 
     if (show_pct && bat >= 0) {
-        char pct_text[8];
+        char pct_text[16];
         TTF_Font *micro = ap_get_font(AP_FONT_MICRO);
         if (!micro) micro = font;
         snprintf(pct_text, sizeof(pct_text), "%d", bat);

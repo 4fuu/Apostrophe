@@ -1,4 +1,50 @@
-# Input regression checks
+# Apostrophe regression checks
+
+## Version macros (host)
+
+`tests/version.c` checks the framework version macros and compile-time
+compatibility assertions without opening a display:
+
+```sh
+make test-version
+```
+
+It verifies `AP_VERSION_REQUIRE()`, `AP_VERSION_AT_LEAST()`, the decimal
+encoding, and that `AP_VERSION_STRING` matches the numeric components. This is
+the host check for Apostrophe's build-time version; it does not test NextUI
+system compatibility or `pak.json` `min_system`.
+
+## Host adapter (host)
+
+`tests/host_adapter.c` checks the optional `ap_host_*` seam with a fake backend
+and a headless SDL instance:
+
+```sh
+make test-host
+```
+
+It covers detached no-ops, attach/detach idempotence, transition-only overlay
+events, input yield/return ordering, queued SDL input isolation across an
+overlay open/close, one-shot quit delivery, and `ap_host_present()` calling the
+backend draw before presenting. The fake backend is test logic, not NextUI or a
+system overlay. `make test` runs this check after `test-version`.
+
+## pak.json reader (host)
+
+`tests/pak_json.c` checks the optional `apostrophe_pak.h` reader against fixture
+files under `tests/fixtures/pak_json/`:
+
+```sh
+make test-pak
+```
+
+It covers a full manifest, missing file/fields and wrong types, directory-name
+fallback, escaped/Unicode strings, ignored nested values, capability limits,
+duplicate keys, malformed JSON, minimum-system comparisons, and capability
+self-checks. The helper is read-only and does not link NextUI. `make test` runs
+this check with the version and host-adapter checks.
+
+## Input regression checks (device toolchain)
 
 Build both checks with the same universal toolchain used by the examples:
 

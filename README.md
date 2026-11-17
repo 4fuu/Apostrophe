@@ -155,6 +155,10 @@ apostrophe.h          — Core: init, lifecycle, input, drawing, theming, fonts,
 apostrophe_widgets.h  — Widgets: list, options list, keyboard, confirmation,
                         selection, process message, download manager, queue manager,
                         detail screen, color picker, help overlay, file picker
+apostrophe_host.h     — Optional host seam: system overlay poll/draw, input
+                        yield/return, one-shot normal exit
+apostrophe_pak.h      — Optional pak.json reader: id/name/version/min_system,
+                        capabilities, and min-system/capability self-checks
 ```
 
 All widgets use a **blocking model**: they run their own event loop and return a result struct when the user completes an action or presses back (`AP_CANCELLED`).
@@ -172,6 +176,16 @@ On device, colors are loaded from NextUI's theme system (`nextval.elf`). Apostro
 Apostrophe abstracts all input sources into a unified virtual button system (`AP_BTN_*`). On desktop (macOS, Linux, or Windows) and recognised gamepads it uses the SDL GameController API; on TrimUI devices it reads raw joystick events; and on the Miyoo Flip (my355) it maps hardware-specific keyboard scancodes. Directional buttons auto-repeat with configurable delay/rate. Miyoo Flip builds also use a higher analog deadzone than other targets to reduce accidental horizontal movement from the thumbstick.
 
 The **combo system** adds support for chords (simultaneous button presses like L1+R1) and sequences (ordered presses like Up, Up, Down, Down). Register combos with `ap_register_chord()` / `ap_register_sequence()` and poll for events with `ap_poll_combo()`. See `examples/combo/` and the [API reference](docs/API.md#combos) for details.
+
+`ap_reset_input()` drops queued SDL/device input and held/repeat state when another focus owner takes or returns input.
+
+### Host Integration
+
+Apps launched by a desktop with a system overlay can opt into `apostrophe_host.h`. The host supplies `poll` and `draw` callbacks; the app calls `ap_host_poll()` before its input, skips input when it returns true, draws its frame, then calls `ap_host_present()`. Focus transitions can call `ap_host_overlay_changed()`, and a normal exit request calls `ap_host_request_quit()`. The header is optional and adds no link-time dependency. See `examples/host/` (fake backend, not a system overlay) and the [API reference](docs/API.md#host-integration-optional).
+
+### Pak Manifest
+
+`apostrophe_pak.h` optionally reads the local pak.json fields `id`, `name`, `version`, `min_system`, and `capabilities`. `ap_pak_load()` uses the pak directory name as a fallback id; missing files/fields and wrong types leave safe defaults. `ap_pak_min_system_ok()` compares against a caller-supplied system version, and `ap_pak_has_capability()` / `ap_pak_check_capabilities()` provide exact capability checks. It is read-only, has no NextUI dependency, and does not install or update packages.
 
 ## Widgets
 

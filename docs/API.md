@@ -10,12 +10,15 @@ This reference documents Apostrophe **v1.2.0** (2026-09-11).
 
 - [Core (apostrophe.h)](#core)
   - [Macros & Constants](#macros--constants)
+  - [Version & Compatibility](#version--compatibility)
   - [Types & Enums](#types--enums)
   - [Lifecycle](#lifecycle)
   - [Screen & Scaling](#screen--scaling)
   - [Theming](#theming)
   - [Fonts](#fonts)
   - [Input](#input)
+  - [Host Integration (optional)](#host-integration-optional)
+  - [Pak Manifest (optional)](#pak-manifest-optional)
   - [Drawing Primitives](#drawing-primitives)
   - [Screen Fade](#screen-fade)
   - [Footer & Status Bar](#footer--status-bar)
@@ -72,6 +75,54 @@ Apostrophe reads `PLATFORM` (falling back to the basename of `SYSTEM_PATH`) and
 supports `tg5040`, `tg5050`, `my355`, and `h700`. The same identity is available
 through `ap_get_platform()`, `ap_get_platform_name()`, `ap_get_device_name()`,
 and `ap_is_device()`.
+
+### Version & Compatibility
+
+| Macro | Value | Description |
+|-------|-------|-------------|
+| `AP_VERSION_MAJOR` | `1` | Apostrophe framework major version |
+| `AP_VERSION_MINOR` | `2` | Apostrophe framework minor version |
+| `AP_VERSION_PATCH` | `0` | Apostrophe framework patch version |
+| `AP_VERSION_STRING` | `"1.2.0"` | Version string derived from the three components |
+| `AP_VERSION_NUMBER` | `1002000` | Decimal encoding for comparisons and logging |
+| `AP_VERSION_ENCODE(major, minor, patch)` | — | Encode a version as `major * 1000000 + minor * 1000 + patch` |
+| `AP_VERSION_AT_LEAST(major, minor, patch)` | — | True when the headers are at least that version |
+| `AP_VERSION_REQUIRE(major, minor, patch)` | — | Fail compilation when the headers are older |
+
+`AP_VERSION_*` identifies the Apostrophe headers used to build the binary. It is
+build-time framework metadata: Apostrophe is header-only, nothing is installed
+on the device, and this value does not describe the running NextUI system.
+
+`AP_VERSION_ENCODE()` reserves three decimal digits per component, so keep each
+version component below 1000. `AP_VERSION_REQUIRE()` uses C11
+`_Static_assert`, matching the project's C11 baseline.
+
+The `pak.json` `min_system` field is separate. It is a system-level requirement
+owned by the desktop launcher/installer and compared against the desktop's
+semantic release tag. Apostrophe does not read `min_system` and cannot check it
+at compile time.
+
+Require a minimum framework version at compile time:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+
+AP_VERSION_REQUIRE(1, 2, 0);
+```
+
+Use `AP_VERSION_AT_LEAST()` for optional feature branches:
+
+```c
+#if AP_VERSION_AT_LEAST(1, 2, 0)
+    /* Code that needs the 1.2.0 headers. */
+#endif
+```
+
+Use `AP_VERSION_STRING` wherever the framework version should be visible, such
+as an About screen. When packaging, the same value can be recorded in the
+optional `pak.json` `apostrophe` field; that field is framework build metadata
+and does not replace `min_system`.
 
 ### Types & Enums
 
@@ -318,6 +369,12 @@ Poll for the next input event. Returns `true` if an event was available.
 
 Handles SDL event processing internally: keyboard events, raw joystick buttons/axes/hats (TrimUI), SDL GameController buttons/axes (macOS + recognised gamepads), platform-specific scancodes (my355), and quit events.
 
+#### `void ap_reset_input(void)`
+
+Drop queued input and all held/repeat state. Pending SDL keyboard, joystick, and controller events are flushed, and device raw-input queues are drained. Combo registrations are kept; transient combo state, directional repeat deadlines, footer-overflow latches, and stored input wake events are cleared.
+
+Call this when another focus owner takes or returns input, so a press or release made against that owner cannot leak into the app. `make test-host` covers this with a fake host. The function is safe with no host adapter attached and does nothing before `ap_init()` completes.
+
 #### `void ap_flip_face_buttons(bool flip)`
 
 Swap A/B and X/Y button mappings. When `flip` is true, hardware A reports as `AP_BTN_B` and vice versa (likewise X/Y). Useful for platforms where the firmware already swaps face buttons.
@@ -333,6 +390,193 @@ Set input debounce delay in milliseconds.
 #### `void ap_set_input_repeat(uint32_t delay_ms, uint32_t rate_ms)`
 
 Configure directional hold repeat timing for D-pad/arrow/button-mapped directions.
+
+### Host Integration (optional)
+
+`include/apostrophe_host.h` is an optional, header-only seam for a desktop that provides a system overlay. Apostrophe does not implement that overlay; the host backend owns its rendering, its inputs, and its overlay lifetime.
+
+Define `AP_HOST_IMPLEMENTATION` in exactly one source file, after `AP_IMPLEMENTATION` for `apostrophe.h`:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_HOST_IMPLEMENTATION
+#include "apostrophe_host.h"
+```
+
+The app main loop becomes:
+
+```c
+ap_host_backend backend = {
+    .user = host_state,
+    .poll = host_poll,       /* 1 = host consumed this frame */
+    .draw = host_draw,       /* called after the app frame, before present */
+};
+ap_host_attach(&backend, on_host_event, app_state);
+
+while (!quit) {
+    if (!ap_host_poll()) {
+        while (ap_poll_input(&ev)) {
+            /* app input */
+        }
+    }
+    draw_app();
+    ap_host_present();       /* host draw, then ap_present() */
+}
+ap_host_detach();
+```
+
+#### Backend callbacks
+
+| Field | Contract |
+|-------|----------|
+| `int (*poll)(void *user)` | Called once per frame. Return 1 when the host or its overlay owns this frame, so the app skips its own input. |
+| `void (*draw)(void *user, SDL_Renderer *renderer)` | Optional. Called by `ap_host_present()` after the app frame and before present. Draw the host overlay into the supplied renderer; do not call `ap_present()`. |
+
+#### `int ap_host_attach(const ap_host_backend *backend, ap_host_event_cb on_event, void *user)`
+
+Attach a backend after `ap_init()`. Returns `AP_OK`, or `AP_ERROR` for a NULL backend, a backend without `poll`, or a different backend while one is already attached. Re-attaching the same backend and callback is idempotent. The struct is copied; the host owns its `user` data and any overlay objects.
+
+#### `void ap_host_detach(void)`
+
+Clear all adapter state. Idempotent. Does not call the backend or change the host overlay; detach before destroying the host object.
+
+#### `bool ap_host_attached(void)`
+
+Whether a backend is attached.
+
+#### `bool ap_host_poll(void)`
+
+Pump the host once. Returns true when the app must skip its own input this frame. Always false while detached. A latched quit request also returns true.
+
+#### `void ap_host_present(void)`
+
+Call after the app has finished drawing, instead of `ap_present()`. Invokes the backend's `draw` (if any) and then presents the frame. While detached it is exactly `ap_present()`.
+
+#### `void ap_host_overlay_changed(bool open)`
+
+Host-to-adapter transition notification. Call only when the overlay actually opens or closes, normally from the host overlay's focus callback. Repeating the current state is a no-op. On a transition the adapter calls `ap_reset_input()`, updates `ap_host_overlay_open()`, and emits `AP_HOST_EVENT_OVERLAY_OPENED` then `AP_HOST_EVENT_INPUT_YIELDED` on open, or `AP_HOST_EVENT_OVERLAY_CLOSED` then `AP_HOST_EVENT_INPUT_RETURNED` on close.
+
+#### `int ap_host_request_quit(void)`
+
+Host's normal application-exit request. Returns 1 when accepted, latches, and emits `AP_HOST_EVENT_QUIT_REQUESTED` once. It never calls `exit()`, raises a signal, kills a process, or touches launcher files. The app must set its own quit flag and leave its main loop. Repeated calls return 1 without a second event.
+
+#### `bool ap_host_overlay_open(void)` / `bool ap_host_quit_requested(void)`
+
+Current adapter state. Both are false while detached.
+
+#### Events
+
+| Event | Meaning |
+|-------|---------|
+| `AP_HOST_EVENT_OVERLAY_OPENED` | Overlay took focus. |
+| `AP_HOST_EVENT_INPUT_YIELDED` | Input was reset and now belongs to the host. |
+| `AP_HOST_EVENT_OVERLAY_CLOSED` | Overlay released focus. |
+| `AP_HOST_EVENT_INPUT_RETURNED` | Input was reset again and the app may poll. |
+| `AP_HOST_EVENT_QUIT_REQUESTED` | One-shot normal exit request. |
+
+Detached behavior is unchanged: no host, no overlay, and no added exit path. A host that implements the overlay with its own module must not copy that renderer into Apostrophe; it only supplies these callbacks.
+
+### Pak Manifest (optional)
+
+`include/apostrophe_pak.h` is an optional, header-only reader for the small
+pak.json fields an app needs at startup. It does not install, update, validate a
+package, or read desktop system files. Define `AP_PAK_IMPLEMENTATION` in exactly
+one source file:
+
+```c
+#define AP_IMPLEMENTATION
+#include "apostrophe.h"
+#define AP_PAK_IMPLEMENTATION
+#include "apostrophe_pak.h"
+```
+
+The four string fields use fixed buffers: `AP_PAK_ID_MAX` 64, `AP_PAK_NAME_MAX`
+128, `AP_PAK_VERSION_MAX` 32, and `AP_PAK_MIN_SYSTEM_MAX` 32. Up to
+`AP_PAK_MAX_CAPABILITIES` (8) capability names are kept, each up to
+`AP_PAK_CAPABILITY_MAX` (32) bytes. A file larger than `AP_PAK_JSON_MAX` (64 KiB)
+is rejected.
+
+```c
+typedef struct {
+    char id[AP_PAK_ID_MAX];
+    char name[AP_PAK_NAME_MAX];
+    char version[AP_PAK_VERSION_MAX];
+    char min_system[AP_PAK_MIN_SYSTEM_MAX];
+    char capabilities[AP_PAK_MAX_CAPABILITIES][AP_PAK_CAPABILITY_MAX];
+    int  capability_count;
+    bool has_id, has_name, has_version, has_min_system;
+    bool capabilities_truncated;
+} ap_pak_info;
+```
+
+#### `void ap_pak_info_init(ap_pak_info *info, const char *fallback_id)`
+
+Fill safe defaults. `id` and `name` use `fallback_id` (or `"unknown"`), version
+and `min_system` are empty, and there are no capabilities.
+
+#### `int ap_pak_load(const char *pak_dir, ap_pak_info *info)`
+
+Read `<pak_dir>/pak.json`. The fallback id/name is the last path component of
+`pak_dir`. A missing/unreadable/oversized file returns `AP_ERROR`, but `info`
+still contains that fallback, so an app can continue with its directory name.
+
+#### `int ap_pak_load_file(const char *path, const char *fallback_id, ap_pak_info *info)` / `int ap_pak_parse(const char *json, const char *fallback_id, ap_pak_info *info)`
+
+Explicit file or in-memory JSON variants. A valid object returns `AP_OK` even
+when fields are absent or the wrong type; malformed JSON returns `AP_ERROR` and
+leaves only the safe defaults. Unknown keys, nested objects/arrays, and
+`device` data are ignored. Duplicate known keys use the last value. JSON escapes,
+UTF-8, and `\u` escapes are accepted.
+
+Missing-field behavior:
+
+| Input | Result |
+|-------|--------|
+| no file / unreadable / oversized / malformed | `AP_ERROR`; directory fallback id/name |
+| no `id` | `id` = fallback, `has_id` = false |
+| no `name` | `name` = `id`, `has_name` = false |
+| no `version` / `min_system` | empty strings, `has_*` = false |
+| wrong field type | field stays at its safe default |
+| no `capabilities` | count 0 |
+| more than 8 capabilities | first 8 kept, `capabilities_truncated` = true |
+
+#### `int ap_pak_min_system_ok(const ap_pak_info *info, const char *system_version)`
+
+Compare `info.min_system` with a caller-supplied desktop version. Returns 1 when
+compatible or when `min_system` is absent, 0 when the system is older, and -1
+when either version is invalid. Versions accept an optional `v`, one to three
+numeric components, and a suffix such as `-rc1`; the suffix is ignored for the
+core comparison. The caller decides where its system version comes from;
+Apostrophe does not read NextUI's `version.txt`.
+
+#### `int ap_pak_has_capability(const ap_pak_info *info, const char *capability)` / `int ap_pak_check_capabilities(...)`
+
+Exact, case-sensitive capability lookup. `ap_pak_check_capabilities(info,
+required, count, &missing)` returns 1 only when all required names are present;
+`missing` receives the first absent name (or NULL). A zero/negative count is
+vacuously satisfied.
+
+Example:
+
+```c
+ap_pak_info pak;
+if (ap_pak_load(".", &pak) != AP_OK) {
+    ap_log("pak.json unavailable; continuing as %s", pak.id);
+}
+
+if (ap_pak_min_system_ok(&pak, system_version) == 0) {
+    /* Show "requires newer system" and leave the normal main loop. */
+}
+
+const char *required[] = { "saves" };
+const char *missing = NULL;
+if (!ap_pak_check_capabilities(&pak, required, 1, &missing))
+    ap_log("capability unavailable: %s", missing);
+```
+
+The helper is read-only and MIT-licensed like the rest of Apostrophe. It does
+not copy NextUI code or assets.
 
 ### Drawing Primitives
 
