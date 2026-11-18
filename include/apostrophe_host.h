@@ -140,6 +140,24 @@ static void ap__host_emit(ap_host_event event) {
     if (ap__host.on_event) ap__host.on_event(ap__host.event_user, event);
 }
 
+static void ap__host_bridge_draw(void *u) {
+    (void)u;
+    if (ap__host.attached && ap__host.backend.draw)
+        ap__host.backend.draw(ap__host.backend.user, ap_get_renderer());
+}
+
+static int ap__host_bridge_poll(void *u) {
+    (void)u;
+    if (!ap__host.attached) return 0;
+    return ap__host.quit_requested || ap__host.overlay_open ||
+           (ap__host.backend.poll && ap__host.backend.poll(ap__host.backend.user));
+}
+
+static int ap__host_bridge_quit(void *u) {
+    (void)u;
+    return ap__host.attached && ap__host.quit_requested;
+}
+
 int ap_host_attach(const ap_host_backend *backend, ap_host_event_cb on_event, void *user) {
     if (!backend || !backend->poll) return AP_ERROR;
 
@@ -158,12 +176,18 @@ int ap_host_attach(const ap_host_backend *backend, ap_host_event_cb on_event, vo
     ap__host.overlay_open = false;
     ap__host.quit_requested = false;
     ap__host.attached = true;
+
+    /* Widget-driven apps never call ap_host_poll()/ap_host_present(); route
+     * their frame loop through the same backend. */
+    ap__host_bridge_set(ap__host_bridge_draw, ap__host_bridge_poll,
+                        ap__host_bridge_quit, NULL);
     return AP_OK;
 }
 
 void ap_host_detach(void) {
     if (!ap__host.attached) return;
 
+    ap__host_bridge_set(NULL, NULL, NULL, NULL);
     memset(&ap__host, 0, sizeof(ap__host));
 }
 
@@ -173,15 +197,20 @@ bool ap_host_attached(void) {
 
 bool ap_host_poll(void) {
     if (!ap__host.attached) return false;
-    if (ap__host.quit_requested) return true;
+    if (ap__host.quit_requested) {
+        ap__host_bridge_mark_polled(1);
+        return true;
+    }
 
     int owned = ap__host.backend.poll ? ap__host.backend.poll(ap__host.backend.user) : 0;
-    return owned || ap__host.overlay_open || ap__host.quit_requested;
+    int consumed = owned || ap__host.overlay_open || ap__host.quit_requested;
+    ap__host_bridge_mark_polled(consumed);
+    return consumed;
 }
 
 void ap_host_present(void) {
-    if (ap__host.attached && ap__host.backend.draw)
-        ap__host.backend.draw(ap__host.backend.user, ap_get_renderer());
+    /* ap_present() draws the attached host overlay before presenting, so a
+     * widget-driven app and an app with its own loop share one path. */
     ap_present();
 }
 

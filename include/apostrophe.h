@@ -640,6 +640,24 @@ bool           ap_poll_combo(ap_combo_event *event);
 
 void           ap_clear_screen(void);
 void           ap_present(void);
+
+/* Internal host bridge, set by apostrophe_host.h. Apostrophe's widgets own
+ * their frame loops, so the app cannot call ap_host_poll()/ap_host_present()
+ * itself while a widget is running. The bridge lets ap_poll_input() and
+ * ap_present() drive the same host backend the seam exposes.
+ *
+ * draw/poll/quit may be NULL. quit is polled once per frame; when it reports a
+ * request, ap_poll_input() injects one synthetic AP_BTN_B so the widget
+ * cancels back to its caller, which can then leave the app.
+ *
+ * Not part of the stable app-facing API. */
+void           ap__host_bridge_set(void (*draw)(void *user),
+                                   int (*poll)(void *user),
+                                   int (*quit)(void *user),
+                                   void *user);
+/* Called by ap_host_poll() so the explicit seam and the widget bridge do not
+ * poll the backend twice in one frame. */
+void           ap__host_bridge_mark_polled(int owned);
 void           ap_draw_background(void);
 void           ap_draw_rounded_rect(int x, int y, int w, int h, int r, ap_color c);
 void           ap_draw_pill(int x, int y, int w, int h, ap_color c);
@@ -2356,7 +2374,52 @@ static void ap__process_sdl_events(void) {
     }
 }
 
+static void (*ap__host_draw_cb)(void *user) = NULL;
+static int (*ap__host_poll_cb)(void *user) = NULL;
+static int (*ap__host_quit_cb)(void *user) = NULL;
+static void *ap__host_bridge_user = NULL;
+static bool ap__host_polled_this_frame = false;
+static bool ap__host_owns_frame = false;
+static bool ap__host_quit_sent = false;
+
+void ap__host_bridge_set(void (*draw)(void *user), int (*poll)(void *user),
+                         int (*quit)(void *user), void *user) {
+    ap__host_draw_cb = draw;
+    ap__host_poll_cb = poll;
+    ap__host_quit_cb = quit;
+    ap__host_bridge_user = user;
+    ap__host_polled_this_frame = false;
+    ap__host_owns_frame = false;
+    ap__host_quit_sent = false;
+}
+
+void ap__host_bridge_mark_polled(int owned) {
+    ap__host_polled_this_frame = true;
+    ap__host_owns_frame = owned != 0;
+}
+
 bool ap_poll_input(ap_input_event *event) {
+    /* The host gets the first say in the frame. It may open/close its overlay,
+     * consume navigation, or ask the app to quit. */
+    if (!ap__host_polled_this_frame) {
+        ap__host_polled_this_frame = true;
+        if (ap__host_poll_cb)
+            ap__host_owns_frame = ap__host_poll_cb(ap__host_bridge_user) != 0;
+    }
+
+    if (ap__host_quit_cb && ap__host_quit_cb(ap__host_bridge_user)) {
+        if (!ap__host_quit_sent) {
+            ap__host_quit_sent = true;
+            event->button = AP_BTN_B;
+            event->pressed = true;
+            event->repeated = false;
+            return true;
+        }
+        return false;
+    }
+
+    if (ap__host_owns_frame) return false;
+
     while (1) {
         /* Process SDL events into our queue */
         ap__process_sdl_events();
@@ -2575,6 +2638,10 @@ static uint32_t ap__next_wake_time(void) {
 }
 
 void ap_present(void) {
+    /* Widget loops call ap_present() directly, so the host overlay is drawn
+     * here rather than only through ap_host_present(). */
+    if (ap__host_draw_cb) ap__host_draw_cb(ap__host_bridge_user);
+
     SDL_RenderPresent(ap__g.renderer);
 
     if (ap__g.needs_frame) {
@@ -2603,6 +2670,10 @@ void ap_present(void) {
         }
     }
     ap__g.last_present_ms = SDL_GetTicks();
+
+    /* Next frame: the host polls again. */
+    ap__host_polled_this_frame = false;
+    ap__host_owns_frame = false;
 }
 
 void ap_draw_background(void) {
